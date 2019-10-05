@@ -9,7 +9,7 @@ class Vector(object):
         if x_axis:
             return Vector(math.cos(angle), math.sin(angle))
         # Orthagonal left (y-axis)
-        return Vector(-math.sin(angle), math.cos(angle))
+        return Vector(math.sin(angle), math.cos(angle))
 
     def __init__(self, x, y):
         self.x = x
