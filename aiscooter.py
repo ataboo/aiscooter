@@ -5,8 +5,10 @@ import pygame
 from vector import Vector
 import math
 
-RED = [255, 0, 0]
-WHITE = [255, 255, 255]
+GREEN = (0, 255, 0)
+RED = (255, 0, 0)
+WHITE = (255, 255, 255)
+TRAN_BLUE = (0, 0, 255, 100)
 
 def clamp(val, lower, upper):
     return max(min(val, upper), lower)
@@ -19,8 +21,14 @@ class Scooter(object):
     steering: int
     steering_rate: float
     speed: float
+    is_alive = True
+    next_checkpoint = 0
+    score = 0
 
     def step(self, delta: float):
+        if not self.is_alive:
+            return
+
         self.set_heading(self.heading + self.steering * delta * self.steering_rate)
         self.pos = self.pos.add(Vector.from_angle(self.heading).scale(delta * self.speed))
 
@@ -36,7 +44,8 @@ class Scooter(object):
             point.y = height - point.y
             corners[i] = point.to_tuple()
 
-        pygame.draw.polygon(screen, RED, corners)
+        color = GREEN if self.is_alive else RED
+        pygame.draw.polygon(screen, color, corners)
 
     def tl_pos(self):
         return self.pos.add(Vector(-self.size.x/2, self.size.y/2).rotate(-self.heading))
@@ -97,37 +106,86 @@ class Scooter(object):
 
 class Game(object):
     def __init__(self):
-        self.scooter = Scooter()
-        self.scooter.pos = Vector(100, 400)
-        self.scooter.size = Vector(10, 20)
+        self.make_scooters(1, Vector(100, 400))
         self.screen_size = (800, 800)
         self.course_flipped = pygame.image.load("map0.png")
         self.course = pygame.transform.flip(self.course_flipped, False, True)
         self.carry_on = True
-        self.scooter.speed = 1
-        self.scooter.steering = 0
-        self.scooter.steering_rate = 0.05
-        self.scooter.heading = 0
+        self.frame_rate = 0
+        self.screen = None
+        self.tran_surface = pygame.Surface(self.screen_size, pygame.SRCALPHA)
+        self.checkpoints = [
+            (Vector(120, 700), 80),
+            (Vector(700, 660), 80),
+            (Vector(290, 500), 80),
+            (Vector(690, 250), 80),
+            (Vector(150, 200), 80)
+        ]
+
+    def make_scooters(self, count, start_pos):
+        scooters = []
+        for _ in range(count):
+            scooter = Scooter()
+            scooter.pos = Vector(start_pos.x, start_pos.y)
+            scooter.size = Vector(10, 20)
+            scooter.speed = 1
+            scooter.steering = 0
+            scooter.steering_rate = 0.05
+            scooter.heading = 0
+            scooters.append(scooter)
+        self.scooters = scooters
 
     def start(self):
         pygame.init()
         pygame.display.set_caption("AI Scooter!")
         clock = pygame.time.Clock()
-        screen = pygame.display.set_mode(self.screen_size)
+        self.screen = pygame.display.set_mode(self.screen_size)
 
         while(self.carry_on):
-            delta = clock.tick(60) / 1000
+            delta = 1
+            if self.frame_rate > 0:
+                delta = clock.tick(self.frame_rate) / 1000
 
-            self.scooter.step(1)
-            self.handle_events()
             self.user_input()
+            self.handle_events()
+            self.update_scooters(delta)
+            self.screen.fill(WHITE)
+            self.screen.blit(self.course_flipped, (0, 0))
+            self.draw_scooters()
+            self.draw_checkpoints()
 
-            screen.fill(WHITE)
-            screen.blit(self.course_flipped, (0, 0))
-            self.scooter.draw(screen)
             pygame.display.flip()
 
-            print("Collision!" if self.scooter.check_collision(self.course) else "No Collision")
+        print("Scores: {0}".format(', '.join(str(s.score) for s in self.scooters)))
+
+    def update_scooters(self, delta):
+        any_alive = False
+
+        for scooter in self.scooters:
+            if scooter.is_alive:
+                any_alive = True
+                scooter.step(delta)
+                scooter.is_alive = not scooter.check_collision(self.course)
+                if not scooter.is_alive:
+                    scooter.score -= 20
+
+                next_point = self.checkpoints[scooter.next_checkpoint]
+                if next_point[0].sub(scooter.pos).magsqr() < next_point[1] * next_point[1]:
+                    scooter.score += 5
+                    scooter.next_checkpoint = 0 if scooter.next_checkpoint == len(self.checkpoints)-1 else scooter.next_checkpoint + 1
+                    print("next checkpoint {0}".format(scooter.next_checkpoint))
+
+        self.carry_on = any_alive
+
+    def draw_scooters(self):
+        for scooter in self.scooters:
+            scooter.draw(self.screen)
+
+    def draw_checkpoints(self):
+        for checkpoint in self.checkpoints:
+            pygame.draw.circle(self.tran_surface, TRAN_BLUE, (checkpoint[0].x, self.screen_size[1] - checkpoint[0].y), checkpoint[1])
+
+        self.screen.blit(self.tran_surface, (0, 0))
 
     def handle_events(self):
         for event in pygame.event.get():
@@ -141,6 +199,8 @@ class Game(object):
             steering -= 1
         if keys[pygame.K_d]:
             steering += 1
-        self.scooter.steering = steering
+
+        for scooter in self.scooters:
+            scooter.steering = steering
 
 Game().start()
