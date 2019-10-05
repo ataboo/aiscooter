@@ -45,6 +45,9 @@ class Vector(object):
     def to_tuple(self):
         return (self.x, self.y)
 
+    def to_int_tuple(self):
+        return (int(self.x), int(self.y))
+
     def orthagonal(self, right):
         if right:
             return Vector(self.y, -self.x)
