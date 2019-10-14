@@ -5,7 +5,6 @@ import numpy as np
 from vector import Vector
 from dqnagent import DQNAgent, Config
 import math
-import copy
 
 GREEN = (0, 255, 0)
 RED = (255, 0, 0)
@@ -19,6 +18,18 @@ def clamp(val, lower, upper):
 def normalize_angle(angle):
     return (angle + math.pi * 2.0) % (math.pi * 2.0)
 
+class Level(object):
+    start: Vector
+    image: pygame.Surface
+    checkpoints: list((Vector, float))
+    heading: float
+
+    def __init__(self, start: Vector, heading: float, image: pygame.Surface, checkpoints: list((Vector, float))):
+        self.start = start
+        self.image = image
+        self.checkpoints = checkpoints
+        self.heading = heading
+
 class Scooter(object):
     pos: Vector
     size: Vector
@@ -31,6 +42,8 @@ class Scooter(object):
     next_checkpoint = 0
     score = 0
     agent: DQNAgent
+    course: pygame.Surface
+    course_flipped: pygame.Surface
 
     def __init__(self, agent: DQNAgent):
         self.agent = agent
@@ -122,31 +135,52 @@ class Scooter(object):
         return (cast_pos, max_range) 
 
 class Game(object):
+    course: pygame.Surface
+    course_flipped: pygame.Surface
+    checkpoints: list((Vector, float))
+
     def __init__(self):
         self.scooters = []
         self.abort = False
-        self.make_scooters(4)
+        self.make_scooters(1)
         self.screen_size = (800, 800)
-        self.course_flipped = pygame.image.load("map0.png")
-        self.course = pygame.transform.flip(self.course_flipped, False, True)
         self.carry_on = True
         self.frame_rate = 0
         self.screen = None
         self.tran_surface = pygame.Surface(self.screen_size, pygame.SRCALPHA)
         self.scooter_surface = pygame.Surface(self.screen_size, pygame.SRCALPHA)
-        self.checkpoints = [
+
+        self.level_1 = Level(Vector(100, 400), math.pi, pygame.image.load("map1.png"), [
+            (Vector(80, 800-550), 60),
+            (Vector(80, 800-650), 60),
+            (Vector(100, 800-700), 60),
+            (Vector(150, 800-720), 60),
+            (Vector(200, 800-720), 60),
+            (Vector(350, 800-700), 60),
+            (Vector(500, 800-700), 60),
+            (Vector(610, 800-710), 60),
+            (Vector(700, 800-660), 60),
+            (Vector(750, 800-600), 60),
+            (Vector(290, 800-500), 80),
+            (Vector(690, 800-250), 80),
+            (Vector(150, 800-200), 80)
+        ])
+
+        self.level_2 = Level(Vector(100, 400), 0, pygame.transform.flip(pygame.image.load("map1.png"), False, True), [
             (Vector(80, 550), 60),
             (Vector(80, 650), 60),
             (Vector(100, 700), 60),
             (Vector(150, 720), 60),
-            (Vector(200, 710), 60),
+            (Vector(200, 720), 60),
             (Vector(350, 700), 60),
             (Vector(500, 700), 60),
-            (Vector(700, 660), 80),
+            (Vector(610, 710), 60),
+            (Vector(700, 660), 60),
+            (Vector(750, 600), 60),
             (Vector(290, 500), 80),
             (Vector(690, 250), 80),
             (Vector(150, 200), 80)
-        ]
+        ])
 
         pygame.init()
         pygame.display.set_caption("AI Scooter!")
@@ -155,7 +189,7 @@ class Game(object):
     def make_scooters(self, count):
         scooters = []
         for _ in range(count):
-            agent = DQNAgent(Config(7, 3))
+            agent = DQNAgent(Config(3, 3))
             scooter = Scooter(agent)
             scooter.pos = Vector(0, 0)
             scooter.size = Vector(10, 20)
@@ -170,7 +204,8 @@ class Game(object):
         epsilon = 0.5
         best_score = -1000
         for i in range(count):
-            game.start(epsilon)
+            level = game.level_1 if i%2 == 0 else game.level_2
+            game.start(level, epsilon)
             if game.abort:
                 print("aborting...")
                 break
@@ -186,21 +221,24 @@ class Game(object):
             for scooter in game.scooters:
                 scooter.agent.replay_new(scooter.agent.memory)
             
-            self.scooters[0].agent.copy_weights_to(self.scooters[2].agent)
-            self.scooters[0].agent.copy_weights_to(self.scooters[3].agent)
+            # self.scooters[0].agent.copy_weights_to(self.scooters[2].agent)
+            # self.scooters[0].agent.copy_weights_to(self.scooters[3].agent)
             # self.scooters[1].agent.copy_weights_to(self.scooters[4].agent)
             # self.scooters[1].agent.copy_weights_to(self.scooters[5].agent)
 
-    def start(self, epsilon):
+    def start(self, level: Level, epsilon: float):
         self.carry_on = True
         clock = pygame.time.Clock()
+
+        self.course = level.image
+        self.course_flipped = pygame.transform.flip(self.course, False, True)
+        self.checkpoints = level.checkpoints
 
         for scooter in self.scooters:
             scooter.is_alive = True
             scooter.agent.epsilon = epsilon
-            scooter.pos.x = 100
-            scooter.pos.y = 400
-            scooter.heading = 0
+            scooter.pos = Vector(level.start.x, level.start.y)
+            scooter.heading = level.heading
             scooter.score = 0
             scooter.next_checkpoint = 0
 
@@ -262,15 +300,17 @@ class Game(object):
             scooter.steering = steering
     
     def get_state(self, scooter: Scooter):
+        cast_length = 80
+
         # [ danger_fwd, danger_left, danger_right, heading_sin, heading_cos, checkpoint_up, checkpout_right, checkpoint_down, checkpoint_left ]
-        danger_fwd = scooter.raycast(scooter.heading, 50, self.course)
-        danger_left = scooter.raycast(normalize_angle(scooter.heading - math.pi / 4.0), 50, self.course)
-        danger_right = scooter.raycast(normalize_angle(scooter.heading + math.pi / 4.0), 50, self.course)
+        danger_fwd = scooter.raycast(scooter.heading, cast_length, self.course)
+        danger_left = scooter.raycast(normalize_angle(scooter.heading - math.pi / 4.0), cast_length, self.course)
+        danger_right = scooter.raycast(normalize_angle(scooter.heading + math.pi / 4.0), cast_length, self.course)
         heading_sin = math.sin(scooter.heading)
         heading_cos = math.cos(scooter.heading)
-        checkpoint_diff = self.checkpoints[scooter.next_checkpoint][0].sub(scooter.pos)
-        checkpoint_up = checkpoint_diff.y > 0
-        checkpoint_right = checkpoint_diff.x > 0
+        # checkpoint_diff = self.checkpoints[scooter.next_checkpoint][0].sub(scooter.pos)
+        # checkpoint_up = checkpoint_diff.y > 0
+        # checkpoint_right = checkpoint_diff.x > 0
         # checkpoint_down = checkpoint_diff.y < 0
         # checkpoint_left = checkpoint_diff.x < 0
 
@@ -281,12 +321,12 @@ class Game(object):
         pygame.draw.line(self.scooter_surface, RED, scooter.pos.to_tuple(), danger_right[0].to_tuple(), 2)
         pygame.draw.circle(self.scooter_surface, RED, danger_right[0].to_int_tuple(), 3)
 
-        return np.array([danger_fwd[1]/50.0, danger_left[1]/50.0, danger_right[1]/50.0, heading_sin, heading_cos, checkpoint_up, checkpoint_right])
+        return np.array([1.0 - danger_fwd[1]/float(cast_length), 1.0 - danger_left[1]/float(cast_length), 1.0 - danger_right[1]/float(cast_length)])
 
     def update_scooter(self, scooter: Scooter, delta: float):
         old_state = self.get_state(scooter)
         action = scooter.agent.choose_action(old_state)
-        reward = 0
+        reward = 0.04
         if action[0]:
             scooter.steering = 0
         elif action[1]:
@@ -297,11 +337,11 @@ class Game(object):
         scooter.step(delta)
         scooter.is_alive = not scooter.check_collision(self.course)
         if not scooter.is_alive:
-            reward = -.75
+            reward = -10
         else:
             next_point = self.checkpoints[scooter.next_checkpoint]
             if next_point[0].sub(scooter.pos).magsqr() < next_point[1] * next_point[1]:
-                reward = 0.04
+                # reward = 0.04
                 scooter.next_checkpoint = 0 if scooter.next_checkpoint == len(self.checkpoints)-1 else scooter.next_checkpoint + 1
                 # print("next checkpoint {0}".format(scooter.next_checkpoint))
 
@@ -309,7 +349,7 @@ class Game(object):
 
         new_state = self.get_state(scooter)
 
-        scooter.agent.train_short_memory(old_state, action , reward, new_state, not scooter.is_alive)
+        scooter.agent.train_short_memory(old_state, action, reward, new_state, not scooter.is_alive)
         scooter.agent.remember(old_state, action, reward, new_state, not scooter.is_alive)
 
 game = Game()

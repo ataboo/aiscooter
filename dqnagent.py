@@ -27,16 +27,16 @@ class DQNAgent(object):
         self.input_count = config.input_count
         self.out_count = config.output_count
         self.model = self.network()
-        self.max_memory = 10000
+        self.max_memory = 100000
 
     def network(self, weights=None):
         model = Sequential()
-        model.add(Dense(units=64, activation='relu', input_dim=self.input_count))
-        model.add(Dropout(0.15))
-        # model.add(Dense(units=120, activation='relu'))
-        # model.add(Dropout(0.15))
-        model.add(Dense(units=64, activation='relu'))
-        model.add(Dropout(0.15))
+        model.add(Dense(units=256, activation='relu', input_dim=self.input_count))
+        model.add(Dropout(0.4))
+        model.add(Dense(units=256, activation='relu'))
+        model.add(Dropout(0.4))
+        model.add(Dense(units=256, activation='relu'))
+        model.add(Dropout(0.4))
         model.add(Dense(units=self.out_count, activation='softmax'))
         opt = Adam(self.learning_rate)
         model.compile(loss='mse', optimizer=opt)
@@ -55,8 +55,8 @@ class DQNAgent(object):
             del self.memory[0]
 
     def replay_new(self, memory):
-        if len(memory) > 100:
-            minibatch = random.sample(memory, 100)
+        if len(memory) > 1000:
+            minibatch = random.sample(memory, 1000)
         else:
             minibatch = memory
         for state, action, reward, next_state, done in minibatch:
